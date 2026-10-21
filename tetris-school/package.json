@@ -1,0 +1,9 @@
+{
+  "name": "classroom-tetris",
+  "version": "1.0.0",
+  "description": "교실용 TETR.IO 규칙 테트리스 실시간 대전 (외부 패키지 없음)",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=16" },
+  "license": "MIT"
+}
