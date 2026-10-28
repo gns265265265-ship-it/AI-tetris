@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d0f16">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>교실 테트리스 대전</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="err-bar"></div>
+<script>
+/* 오류 표시 + 선생님 PC 서버 창으로 오류 전송 (구형 브라우저에서도 동작하도록 ES5 로 작성) */
+(function () {
+  var sent = 0;
+  function base() {
+    var q = /[?&]server=([^&]+)/.exec(location.search);
+    var u = q ? decodeURIComponent(q[1]) : (window.TETRIS_SERVER || '');
+    if (u) { if (!/^(wss?|https?):\/\//i.test(u)) u = 'https://' + u; return u.replace(/^ws/i, 'http').replace(/\/+$/, ''); }
+    if (location.protocol === 'file:') return null;
+    return location.protocol + '//' + location.host;
+  }
+  window.__reportError = function (msg) {
+    if (sent++ > 10) return;
+    var b = base(); if (!b) return;
+    try {
+      var x = new XMLHttpRequest();
+      x.open('POST', b + '/api/log', true);
+      x.setRequestHeader('Content-Type', 'text/plain');
+      x.send(JSON.stringify({ kind: 'error', msg: String(msg) + ' | ' + location.href }));
+    } catch (e) { /* ignore */ }
+  };
+  function show(msg) {
+    var bar = document.getElementById('err-bar');
+    if (bar) { bar.style.display = 'block'; bar.textContent += '⚠ 오류: ' + msg + '\n'; }
+    window.__reportError(msg);
+  }
+  window.onerror = function (msg, src, line, col) {
+    show(msg + ' (' + String(src || '').split('/').pop() + ':' + line + ':' + col + ')');
+  };
+  window.addEventListener && window.addEventListener('unhandledrejection', function (e) {
+    show('Promise: ' + (e.reason && (e.reason.message || e.reason)));
+  });
+  // 구형 브라우저 검사
+  try { new Function('class A{}; const f = (a = 1) => a; let [x] = [1]; for (const y of [1]) {}'); }
+  catch (e) { setTimeout(function () { show('이 브라우저는 너무 오래되어 게임을 실행할 수 없습니다. Chrome 또는 Safari 를 최신 버전으로 업데이트하세요.'); }, 0); }
+})();
+</script>
+
+<!-- ===================== 로비 ===================== -->
+<section id="lobby" class="screen active">
+  <div class="title">
+    <h1>TETRIS <span>교실 대전</span></h1>
+    <p class="sub">TETR.IO 규칙 · 최대 30명 실시간 대전 · PC/모바일</p>
+  </div>
+  <div id="share-box" class="hidden"></div>
+  <div class="cards">
+    <div class="card">
+      <label class="field">닉네임
+        <input id="name" maxlength="12" placeholder="이름 또는 별명" autocomplete="off">
+      </label>
+      <button id="btn-create" class="btn primary">방 만들기</button>
+      <div class="join-row">
+        <input id="code" maxlength="4" placeholder="방 코드" autocomplete="off" autocapitalize="characters">
+        <button id="btn-join" class="btn">참가</button>
+      </div>
+      <p id="lobby-msg" class="msg"></p>
+      <hr>
+      <button id="btn-solo" class="btn">혼자 연습 (40줄 스프린트)</button>
+      <button id="btn-settings" class="btn ghost">⚙ 조작 설정</button>
+      <p id="conn-status" class="conn">서버 연결 중…</p>
+      <a id="diag-link" class="diag-link" href="check.html">🔧 접속이 안 되나요? 접속 진단</a>
+    </div>
+    <div class="card help">
+      <h3>기본 조작</h3>
+      <table id="help-table"></table>
+      <p class="touch-help">📱 휴대폰·태블릿에서는 게임 화면 아래에 <b>터치 키패드</b>가 나타납니다.
+        ◀ ▶ 를 누르고 있으면 계속 이동하고, ↓ 를 누르고 있으면 빠르게 내려갑니다.</p>
+      <h3>대전 규칙</h3>
+      <ul>
+        <li>줄을 지우면 상대에게 <b>방해줄</b>을 보냅니다. 받을 줄은 보드 왼쪽 빨간 막대로 표시됩니다.</li>
+        <li>내가 공격하면 받을 방해줄이 먼저 <b>상쇄</b>됩니다.</li>
+        <li>4줄(쿼드)=4, T-스핀 더블=4, T-스핀 트리플=6, 올 클리어=+10 줄. B2B와 콤보로 공격력이 커집니다.</li>
+        <li>공격 대상: PC는 숫자 1~4 키, 모바일은 화면 위 "공격 대상"을 눌러서 바꿉니다.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 대기실 ===================== -->
+<section id="room" class="screen">
+  <div class="card room-card">
+    <p class="room-label">방 코드</p>
+    <p id="room-code" class="room-code">----</p>
+    <p class="sub">친구들에게 이 코드를 알려주세요</p>
+    <p id="player-count" class="sub"></p>
+    <ul id="player-list"></ul>
+    <label class="check"><input type="checkbox" id="opt-ramp" checked> 2분 후부터 낙하 속도 점점 증가 (TETR.IO 방식)</label>
+    <button id="btn-start" class="btn primary">게임 시작</button>
+    <p id="room-msg" class="msg"></p>
+    <button id="btn-leave" class="btn ghost">방 나가기</button>
+  </div>
+</section>
+
+<!-- ===================== 게임 ===================== -->
+<section id="game-screen" class="screen">
+  <div id="topbar">
+    <span id="tb-mode"></span>
+    <button id="tb-target" class="tb-target"></button>
+    <span class="tb-right">
+      <button id="btn-fs" class="btn small ghost hidden" title="전체 화면">⛶</button>
+      <button id="btn-quit" class="btn small ghost">나가기</button>
+    </span>
+  </div>
+  <div id="arena" class="desktop">
+    <div id="opponents"></div>
+    <div id="me">
+      <div class="side left">
+        <div class="box-label">HOLD</div>
+        <canvas id="hold"></canvas>
+        <div id="stats"></div>
+      </div>
+      <div class="board-wrap">
+        <canvas id="board"></canvas>
+        <div id="action"></div>
+        <div id="overlay" class="hidden"></div>
+      </div>
+      <div class="side right">
+        <div class="box-label">NEXT</div>
+        <canvas id="next"></canvas>
+      </div>
+    </div>
+    <div id="pads" class="hidden">
+      <div id="pad-left" class="pad"></div>
+      <div id="pad-right" class="pad"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 설정 ===================== -->
+<div id="settings-modal" class="modal hidden">
+  <div class="card modal-card">
+    <h2>조작 설정</h2>
+    <div class="set-grid">
+      <label>DAS (자동이동 시작 지연) <span id="v-das"></span>
+        <input type="range" id="s-das" min="0" max="333" step="1"></label>
+      <label>ARR (자동이동 간격) <span id="v-arr"></span>
+        <input type="range" id="s-arr" min="0" max="83" step="1"></label>
+      <label>SDF (소프트 드롭 속도) <span id="v-sdf"></span>
+        <input type="range" id="s-sdf" min="1" max="41" step="1"></label>
+      <label class="check"><input type="checkbox" id="s-ghost"> 고스트(착지 위치) 표시</label>
+      <label class="row">화면 터치 키패드
+        <select id="s-pad">
+          <option value="auto">자동 (터치 기기에서만)</option>
+          <option value="on">항상 켜기</option>
+          <option value="off">끄기</option>
+        </select></label>
+      <label class="row">키패드 크기 <span id="v-padscale"></span>
+        <input type="range" id="s-padscale" min="70" max="130" step="5"></label>
+      <label class="check"><input type="checkbox" id="s-vibrate"> 키패드 누를 때 진동 (안드로이드)</label>
+    </div>
+    <h3>키보드 설정 <small>(버튼을 누른 뒤 원하는 키를 누르세요)</small></h3>
+    <div id="bind-list"></div>
+    <div class="modal-btns">
+      <button id="s-reset" class="btn ghost">기본값으로</button>
+      <button id="s-close" class="btn primary">저장 후 닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="engine.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
